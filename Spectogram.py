@@ -78,7 +78,7 @@ def loadData(file_path, input_length=input_length):
         data = np.pad(data, (offset, input_length - len(data) - offset), "constant")
     data = GetLogMelSpec(data)
     #display_spectogram(data)
-    print(int_to_label[file_to_int[os.path.basename(file_path)]])
+    #print(int_to_label[file_to_int[os.path.basename(file_path)]])
 
     return data
 
@@ -133,7 +133,7 @@ tr_files, val_files = train_test_split(sorted(train_files), test_size=0.1, rando
 model = GetMELModel()
 model.fit_generator(train_generator(tr_files), steps_per_epoch=len(tr_files)//batch_size, epochs=20,
                     validation_data=train_generator(val_files), validation_steps=len(val_files)//batch_size,
-                   use_multiprocessing=False, workers=1, max_queue_size=60,
+                   use_multiprocessing=False, workers=16, max_queue_size=60,
                     callbacks=[ModelCheckpoint("baseline_cnn_mel.h5", monitor="val_acc", save_best_only=True),
                                EarlyStopping(patience=5, monitor="val_acc")])
     
