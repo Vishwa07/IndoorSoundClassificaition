@@ -19,7 +19,6 @@ from sklearn.model_selection import train_test_split
 import glob
 import pandas as pd
 import random
-print(os.listdir("../Input"))
 train = '../Input/train'
 test = '../Input/test'
 
@@ -37,9 +36,10 @@ def train_generator(list_files, batch_size=batch_size):
     while True:
         random.shuffle(list_files)
         for batch_files in chunker(list_files, size=batch_size):
+            
             batch_data = [loadData(fpath) for fpath in batch_files]
             batch_data = np.array(batch_data)[:, :, :,np.newaxis]
-            batch_labels = [file_to_int[fpath] for fpath in batch_files]
+            batch_labels = [file_to_int[os.path.basename(fpath)] for fpath in batch_files]
             batch_labels = np.array(batch_labels)
             
             yield batch_data, batch_labels
@@ -58,10 +58,10 @@ def GetLogMelSpec(audio, sample_rate=16000, window_size=20, #log_specgram
 
     mel_spec = librosa.feature.melspectrogram(y=audio, sr=sample_rate, n_mels= n_mels)
     mel_db = (librosa.power_to_db(mel_spec, ref=np.max) + 40)/40
-    log_specgram = np.log(mel_db.T.astype(np.float32) + eps)
+    #log_specgram = np.log(mel_db.T.astype(np.float32) + eps)
 
 
-    return log_specgram
+    return mel_db.T
 
 def loadData(file_path, input_length=input_length):
     data = librosa.core.load(file_path, sr=16000)[0] #, sr=16000
@@ -77,7 +77,9 @@ def loadData(file_path, input_length=input_length):
             offset = 0
         data = np.pad(data, (offset, input_length - len(data) - offset), "constant")
     data = GetLogMelSpec(data)
-    display_spectogram(data)
+    #display_spectogram(data)
+    print(int_to_label[file_to_int[os.path.basename(file_path)]])
+
     return data
 
 def GetMELModel():
@@ -108,8 +110,10 @@ def GetMELModel():
     model.summary()
     return model
 
-train_files = glob.glob(train+"/*.wav")
-test_files = glob.glob(train+"/*.wav")
+
+
+train_files = glob.glob("../Input/train/*.wav")
+test_files = glob.glob("../Input/test/*.wav")
 train_labels = pd.read_csv("../input/train.csv")
 labels = dict()
 
@@ -129,9 +133,11 @@ tr_files, val_files = train_test_split(sorted(train_files), test_size=0.1, rando
 model = GetMELModel()
 model.fit_generator(train_generator(tr_files), steps_per_epoch=len(tr_files)//batch_size, epochs=20,
                     validation_data=train_generator(val_files), validation_steps=len(val_files)//batch_size,
-                   use_multiprocessing=False, workers=8, max_queue_size=60,
+                   use_multiprocessing=False, workers=1, max_queue_size=60,
                     callbacks=[ModelCheckpoint("baseline_cnn_mel.h5", monitor="val_acc", save_best_only=True),
                                EarlyStopping(patience=5, monitor="val_acc")])
+    
+model.save_weights("baseline_cnn_mel.h5")
 
 loadData(os.path.join(train, '00ad7068.wav'))    
 loadData(os.path.join(train, '00c934d7.wav'))    
