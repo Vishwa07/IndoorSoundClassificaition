@@ -46,7 +46,7 @@ def train_generator(list_files, batch_size=batch_size):
             
 
 def display_spectogram(log_S):
-    sr = 22050
+    sr = 16000
     plt.figure(figsize=(12,4))
     librosa.display.specshow(log_S, sr=sr, x_axis='time', y_axis='mel')
     plt.title('log mel power spectrogram')
@@ -114,10 +114,10 @@ def GetMELModel():
 
 train_files = glob.glob("../Input/train/*.wav")
 test_files = glob.glob("../Input/test/*.wav")
-train_labels = pd.read_csv("../input/train.csv")
+train_labels = pd.read_csv("../Input/train.csv")
 labels = dict()
 
-#for name,label  in zip(train_labels.fname.values,train_labels.label.values):
+#for name,label  in zip(train_labCoels.fname.values,train_labels.label.values):
 #    labels[name]=label
 
 for name,label  in zip(train_labels.fname.values,train_labels.label.values):
@@ -131,9 +131,10 @@ file_to_int = {k:label_to_int[v] for k,v in labels.items()}
 tr_files, val_files = train_test_split(sorted(train_files), test_size=0.1, random_state=42)
 
 model = GetMELModel()
-model.fit_generator(train_generator(tr_files), steps_per_epoch=len(tr_files)//batch_size, epochs=20,
+model.load_weights("baseline_cnn_mel.h5")
+model.fit_generator(train_generator(tr_files), steps_per_epoch=len(tr_files)//batch_size, epochs=10,
                     validation_data=train_generator(val_files), validation_steps=len(val_files)//batch_size,
-                   use_multiprocessing=False, workers=16, max_queue_size=60,
+                   use_multiprocessing=False, workers=8, max_queue_size=60,
                     callbacks=[ModelCheckpoint("baseline_cnn_mel.h5", monitor="val_acc", save_best_only=True),
                                EarlyStopping(patience=5, monitor="val_acc")])
     
