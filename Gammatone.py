@@ -26,7 +26,7 @@ import pandas as pd
 import random
 from gammatone_filterbank import GammatoneFilterbank
 from keras.utils import multi_gpu_model
-
+from sklearn.metrics import classification_report, confusion_matrix
 train = '../Input/train'
 test = '../Input/test'
 
@@ -157,13 +157,36 @@ tr_files, val_files = train_test_split(sorted(train_files), test_size=0.1, rando
 
 
 model = GetConvModel()
-#model.load_weights("baseline_cnn_gammatone.h5")
+model.load_weights("baseline_cnn_gammatone.h5")
+
 model.fit_generator(train_generator(tr_files), steps_per_epoch=len(tr_files)//batch_size, epochs=10,
                     validation_data=train_generator(val_files), validation_steps=len(val_files)//batch_size,
                    use_multiprocessing=False, workers=8, max_queue_size=60,
                     callbacks=[ModelCheckpoint("baseline_cnn_gammatone.h5", monitor="val_acc", save_best_only=True),
                                EarlyStopping(patience=5, monitor="val_acc")])
+model.save_weights("baseline_cnn_comb.h5")
     
-model.save_weights("baseline_cnn_gammatone.h5")
- 
- 
+#pred = []
+#groundtruth = []
+#index=1
+#for name in val_files:
+#    print(index)
+#    data = [loadData(name)]
+#    data = np.array(data)[:, :, :,np.newaxis]
+#    Y_pred = model.predict(data)
+#    groundtruth.append(label_to_int[labels[name.split('\\')[-1]]])
+#    pred.append(np.argmax(Y_pred, axis=1))
+#    index=index+1
+#    
+#
+#predarray = np.asarray(pred)
+#groundtrutharray = np.asarray(groundtruth)
+#
+#    
+#
+#print('Confusion Matrix')
+#print(confusion_matrix(groundtrutharray, predarray))
+#print('Classification Report')
+#print(classification_report(groundtrutharray, predarray))
+# 
+# 

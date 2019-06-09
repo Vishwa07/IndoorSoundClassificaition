@@ -142,6 +142,8 @@ def GetConvModel():
 train_files = glob.glob("../Input/train/*.wav")
 test_files = glob.glob("../Input/test/*.wav")
 train_labels = pd.read_csv("../Input/train.csv")
+test_labels = pd.read_csv("../Input/test.csv")
+
 labels = dict()
 
 #for name,label  in zip(train_labCoels.fname.values,train_labels.label.values):

@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
 """
+Created on Mon Jun  3 04:56:32 2019
+
+@author: vmarimut
+"""
+
+# -*- coding: utf-8 -*-
+"""
 Created on Tue May 28 22:55:36 2019
 
 @author: vmarimut
@@ -26,11 +33,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from keras import optimizers, losses, activations, models
 from keras.callbacks import ModelCheckpoint, EarlyStopping
-from keras.layers import Dense, Input, Dropout, BatchNormalization, Convolution2D, MaxPool2D, GlobalMaxPool2D,Activation,Flatten,concatenate
+from keras.layers import Dense, Input, Dropout, BatchNormalization, Convolution2D, MaxPool2D,MaxPooling2D, GlobalMaxPool2D,Activation,Flatten,concatenate
 from sklearn.model_selection import train_test_split
 from keras.utils import Sequence, to_categorical
 from keras import initializers
+import scipy.ndimage
+
 import glob
+from sklearn.metrics import classification_report, confusion_matrix
+
 import pandas as pd
 import random
 from keras.utils import multi_gpu_model
@@ -40,7 +51,7 @@ test = '../Input/test'
 usemultiGPU = False
 numGPU = 8
 input_length = 22100*5
-batch_size = 128 
+batch_size = 16 
 eps =1e-8
 Debugging=False
 def chunker(seq, size):
@@ -52,12 +63,15 @@ def train_generator(list_files, batch_size=batch_size):
     while True:
         random.shuffle(list_files)
         for batch_files in chunker(list_files, size=batch_size):
+
+            batch_data,batch_data_STFT = loadDataFileList(batch_files)
            
-            batch_data = [loadData(fpath) for fpath in batch_files]
             batch_data = np.array(batch_data)[:, :, :,np.newaxis]
+            batch_data_STFT = np.array(batch_data_STFT)[:, :, :,np.newaxis]
+            
             batch_labels = [file_to_int[os.path.basename(fpath)] for fpath in batch_files]
             batch_labels = np.array(batch_labels)            
-            yield batch_data, batch_labels
+            yield [batch_data,batch_data_STFT], batch_labels
             
 def display_spectogram(log_S):
     sr = 22100
@@ -66,6 +80,24 @@ def display_spectogram(log_S):
     plt.title('cqt_note spectrogram')
     plt.colorbar(format='%+02.0f dB')
     plt.tight_layout()
+
+def display_spectogramSTFT(log_S):
+    sr = 22100
+    plt.figure(figsize=(14,5))
+    librosa.display.specshow(log_S, sr=sr, x_axis='time', y_axis='log')
+    plt.title('stft spectrogram')
+    plt.colorbar(format='%+02.0f dB')
+    plt.tight_layout()
+    
+    
+def GetSTFT(audio, sample_rate=22100):
+    
+   
+    stft_spec = librosa.core.stft(y=audio)
+    stft_db = (librosa.amplitude_to_db(abs(stft_spec), ref=np.max))
+    #isplay_spectogramSTFT(stft_db)
+    #print(cqt_db.shape)
+    return stft_db.T
     
 def GetCQT(audio, sample_rate=22100):
     
@@ -74,9 +106,53 @@ def GetCQT(audio, sample_rate=22100):
     cqt_db = (librosa.amplitude_to_db(abs(cqt_spec), ref=np.max))
     #display_spectogram(cqt_db)
     #print(cqt_db.shape)
-    return cqt_spec.T
+    return cqt_db.T
 
-def loadData(file_path, input_length=input_length):
+def loadDataFileList(file_list, input_length=input_length,isSTFT=False):
+    
+    
+    dataSTFTList =[]
+    dataCQTList = []
+    for file_path in file_list:
+        data = librosa.core.load(file_path, sr=22100)[0] #, sr=16000
+        
+        if len(data)>input_length:    
+            max_offset = len(data)-input_length        
+            offset = np.random.randint(max_offset)        
+            data = data[offset:(input_length+offset)]
+        else:
+            if input_length > len(data):
+                max_offset = input_length - len(data)
+                offset = np.random.randint(max_offset)
+            else:
+                offset = 0
+            data = np.pad(data, (offset, input_length - len(data) - offset), "constant")
+        
+        #data = data.reshape(data.shape[0],1).T   
+        dataSTFT = GetSTFT(data)
+        dataCQT = GetCQT(data)
+    #print(data.shape)
+   # data = GetGammatone(data)
+    #display_spectogram(data)
+    #print(int_to_label[file_to_int[os.path.basename(file_path)]])
+    #display_spectogram(data)
+    #normalising 
+        mean = np.mean(dataCQT, axis=0)
+        std = np.std(dataCQT, axis=0) + eps
+        
+        data = np.divide(dataCQT - mean,std)
+        
+        mean = np.mean(dataSTFT, axis=0)
+        std = np.std(dataSTFT, axis=0) + eps
+        
+        dataSTFT = np.divide(dataSTFT - mean,std)
+        
+        dataSTFTList.append(dataSTFT)
+        dataCQTList.append(data)
+    #display_spectogram(data)
+    return dataCQTList,dataSTFTList
+
+def loadData(file_path, input_length=input_length,isSTFT=False):
     data = librosa.core.load(file_path, sr=22100)[0] #, sr=16000
     
     if len(data)>input_length:    
@@ -91,7 +167,8 @@ def loadData(file_path, input_length=input_length):
             offset = 0
         data = np.pad(data, (offset, input_length - len(data) - offset), "constant")
     
-    #data = data.reshape(data.shape[0],1).T    
+    #data = data.reshape(data.shape[0],1).T   
+    dataSTFT = GetSTFT(data)
     data = GetCQT(data)
     #print(data.shape)
    # data = GetGammatone(data)
@@ -103,40 +180,63 @@ def loadData(file_path, input_length=input_length):
     std = np.std(data, axis=0) + eps
     
     data = np.divide(data - mean,std)
+    
+    mean = np.mean(dataSTFT, axis=0)
+    std = np.std(dataSTFT, axis=0) + eps
+    
+    dataSTFT = np.divide(dataSTFT - mean,std)
     #display_spectogram(data)
-    return data
+    return data,dataSTFT
 
 def GetConvModel():
 
     nclass = len(list_labels)
+    
+    
+    
     inp = Input(shape=(216, 120, 1))
-    x = Convolution2D(32, (4,10), padding="same")(inp)
-    x = BatchNormalization()(x)
-    x = Activation("relu")(x)
-    x = MaxPool2D()(x)
-    
-    x = Convolution2D(32, (4,10), padding="same")(x)
-    x = BatchNormalization()(x)
-    x = Activation("relu")(x)
-    x = MaxPool2D()(x)
-    
-    x = Convolution2D(32, (4,10), padding="same")(x)
-    x = BatchNormalization()(x)
-    x = Activation("relu")(x)
-    x = MaxPool2D()(x)
-    
-    x = Convolution2D(32, (4,10), padding="same")(x)
-    x = BatchNormalization()(x)
-    x = Activation("relu")(x)
-    x = MaxPool2D()(x)
 
-    x = Flatten()(x)
-    x = Dense(64,)(x)
-    x = BatchNormalization()(x)
-    x = Activation("relu")(x)
-    out = Dense(nclass, activation='softmax')(x)
-    model = models.Model(inputs=inp, outputs=out)
-    opt = optimizers.Adam(lr=0.00005, beta_1=0.9, beta_2=0.999)
+    inp1 = Input(shape=(216, 1025, 1))
+
+
+    norm_inp1 = BatchNormalization()(inp1)
+    img_1 = Convolution2D(16, kernel_size=(3, 7), activation=activations.relu)(norm_inp1)
+    img_1 = Convolution2D(16, kernel_size=(3, 7), activation=activations.relu)(img_1)
+    img_1 = MaxPooling2D(pool_size=(3, 7))(img_1)
+    img_1 = Dropout(rate=0.1)(img_1)
+    img_1 = Convolution2D(32, kernel_size=3, activation=activations.relu)(img_1)
+    img_1 = Convolution2D(32, kernel_size=3, activation=activations.relu)(img_1)
+    img_1 = MaxPooling2D(pool_size=(3, 3))(img_1)
+    img_1 = Dropout(rate=0.1)(img_1)
+    img_1 = Convolution2D(128, kernel_size=3, activation=activations.relu)(img_1)
+    img_1 = GlobalMaxPool2D()(img_1)
+    img_1 = Dropout(rate=0.1)(img_1)
+
+
+
+    norm_inp = BatchNormalization()(inp)
+    x = Convolution2D(16, kernel_size=(3, 7), activation=activations.relu)(norm_inp)
+    x = Convolution2D(16, kernel_size=(3, 7), activation=activations.relu)(x)
+    x = MaxPooling2D(pool_size=(3, 7))(x)
+    x = Dropout(rate=0.1)(x)
+    x = Convolution2D(32, kernel_size=3, activation=activations.relu)(x)
+    x = Convolution2D(32, kernel_size=3, activation=activations.relu)(x)
+    x = MaxPooling2D(pool_size=(3, 3))(x)
+    x = Dropout(rate=0.1)(x)
+    x = Convolution2D(128, kernel_size=3, activation=activations.relu)(x)
+    x = GlobalMaxPool2D()(x)
+    x = Dropout(rate=0.1)(x)    
+    #print(x.shape)
+    #print(img_1.shape)
+    encode_combined = concatenate([img_1, x],axis=-1)
+    
+    #print(encode_combined.shape)
+    dense_1 = BatchNormalization()(Dense(128, activation=activations.relu)(encode_combined))
+    dense_1 = BatchNormalization()(Dense(128, activation=activations.relu)(dense_1))
+    out = Dense(nclass, activation=activations.softmax)(dense_1)
+    
+    model = models.Model(inputs=[inp,inp1], outputs=out)
+    opt = optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999)
     if usemultiGPU:
         parallel_model = multi_gpu_model(model, gpus=numGPU)
         parallel_model.compile(optimizer=opt, loss=losses.sparse_categorical_crossentropy, metrics=['acc'])
@@ -153,6 +253,8 @@ def GetConvModel():
 train_files = glob.glob("../Input/train/*.wav")
 test_files = glob.glob("../Input/test/*.wav")
 train_labels = pd.read_csv("../Input/train.csv")
+test_labels = pd.read_csv("../Input/test.csv")
+
 labels = dict()
 
 #for name,label  in zip(train_labCoels.fname.values,train_labels.label.values):
@@ -166,7 +268,7 @@ label_to_int = {k:v for v,k in enumerate(list_labels)}
 int_to_label = {v:k for k,v in label_to_int.items()}
 file_to_int = {k:label_to_int[v] for k,v in labels.items()}
 
-tr_files, val_files = train_test_split(sorted(train_files), test_size=0.2, random_state=42)
+tr_files, val_files = train_test_split(sorted(train_files), test_size=0.1, random_state=42)
 
 
 
@@ -184,7 +286,7 @@ tr_files, val_files = train_test_split(sorted(train_files), test_size=0.2, rando
 
 
 model = GetConvModel()
-model.load_weights("baseline_cnn_CQT.h5")
+#model.load_weights("baseline_cnn_comb.h5")
 layer_names = []
 
 if Debugging:    
@@ -225,38 +327,38 @@ if Debugging:
         plt.grid(False)
         plt.imshow(display_grid, aspect='auto', cmap='viridis')
         plt.show()
-
-
-
-history = model.fit_generator(train_generator(tr_files), steps_per_epoch=len(tr_files)//batch_size, epochs=20,
-                    validation_data=train_generator(val_files), validation_steps=len(val_files)//batch_size,
-                   use_multiprocessing=True, workers=8, max_queue_size=20,
-                    callbacks=[ModelCheckpoint("baseline_cnn_CQT.h5", monitor="val_acc", save_best_only=True)],verbose=1)
-                               #EarlyStopping(patience=5, monitor="val_acc")],verbose=1)
+        
+        
+        
+#loadData(os.path.join(train, '00ad7068.wav'),isSTFT=True)    
+#loadData(os.path.join(train, '00c934d7.wav'),isSTFT=False)    
+#loadData(os.path.join(train, '00d1fe46.wav'),isSTFT=False)    
+#loadData(os.path.join(train, '00d40fa2.wav'),isSTFT=False)    
  
-model.save_weights("baseline_cnn_CQT.h5")
-
-fig =  plt.figure(figsize=(12,5))
-plt.plot(history.history['acc'])
-plt.plot(history.history['val_acc'])
-plt.title('model accuracy')
-plt.ylabel('accuracy')
-plt.xlabel('epoch')
-plt.legend(['train', 'test'], loc='upper left')
-plt.ioff()
-plt.savefig("accuracy.png") 
-plt.close(fig)
 
 
-# summarize history for loss
-fig =  plt.figure(figsize=(12,5))
-plt.plot(history.history['loss'])
-plt.plot(history.history['val_loss'])
-plt.title('model loss')
-plt.ylabel('loss')
-plt.xlabel('epoch')
-plt.legend(['train', 'test'], loc='upper left')
-plt.ioff()
-plt.savefig("loss.png") 
-plt.close(fig)
-# 
+model.load_weights("baseline_cnn_comb.h5")
+pred = []
+groundtruth = []
+index = 1
+for name in tr_files:
+    print(index)
+    dataCQT,dataSTFT= loadData(name)
+    dataCQT = [dataCQT]
+    dataSTFT = [dataSTFT]
+    dataSTFT = np.array(dataSTFT)[:, :, :,np.newaxis]
+    dataCQT = np.array(dataCQT)[:, :, :,np.newaxis]
+    Y_pred = model.predict([dataCQT,dataSTFT])
+    groundtruth.append(label_to_int[labels[name.split('\\')[-1]]])
+    pred.append(np.argmax(Y_pred, axis=1))
+    index=index+1
+    
+predarray = np.asarray(pred)
+groundtrutharray = np.asarray(groundtruth)
+
+    
+
+print('Confusion Matrix')
+print(confusion_matrix(groundtrutharray, predarray))
+print('Classification Report')
+print(classification_report(groundtrutharray, predarray))
